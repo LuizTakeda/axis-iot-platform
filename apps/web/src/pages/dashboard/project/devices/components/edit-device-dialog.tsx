@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -41,49 +41,56 @@ export function EditDeviceDialog({
   onOpenChange,
   onConfirm,
 }: Props) {
-  const [entityName, setEntityName] = useState("");
-  const [entityType, setEntityType] = useState("");
-  const [transport, setTransport] = useState("");
-  const [apikey, setApikey] = useState("");
-  const [endpoint, setEndpoint] = useState("");
+  if (!device) return null;
 
-  const [attributes, setAttributes] = useState<IotDeviceAttributeType[]>([]);
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-2xl max-h-[90vh] flex flex-col p-0 overflow-hidden">
+        <EditDeviceForm
+          key={device.device_id}
+          device={device}
+          onOpenChange={onOpenChange}
+          onConfirm={onConfirm}
+        />
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+type FormProps = {
+  device: IotDeviceType;
+  onOpenChange: (open: boolean) => void;
+  onConfirm: (deviceId: string, body: UpdateDeviceBodyType) => Promise<void>;
+};
+
+function EditDeviceForm({ device, onOpenChange, onConfirm }: FormProps) {
+  const [entityName, setEntityName] = useState(device.entity_name || "");
+  const [entityType, setEntityType] = useState(device.entity_type || "Device");
+  const [transport, setTransport] = useState(device.transport || "MQTT");
+  const [apikey, setApikey] = useState(device.apikey || "");
+  const [endpoint, setEndpoint] = useState(device.endpoint || "");
+
+  const [attributes, setAttributes] = useState<IotDeviceAttributeType[]>(() =>
+    device.attributes && device.attributes.length > 0
+      ? [...device.attributes]
+      : [],
+  );
   const [staticAttributes, setStaticAttributes] = useState<
     IotDeviceStaticAttributeType[]
-  >([]);
-  const [commands, setCommands] = useState<IotDeviceCommandType[]>([]);
+  >(() =>
+    device.static_attributes && device.static_attributes.length > 0
+      ? [...device.static_attributes]
+      : [],
+  );
+  const [commands, setCommands] = useState<IotDeviceCommandType[]>(() =>
+    device.commands && device.commands.length > 0 ? [...device.commands] : [],
+  );
 
   const [activeTab, setActiveTab] = useState<
     "general" | "attributes" | "advanced"
   >("general");
 
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  useEffect(() => {
-    if (device) {
-      setEntityName(device.entity_name || "");
-      setEntityType(device.entity_type || "Device");
-      setTransport(device.transport || "MQTT");
-      setApikey(device.apikey || "");
-      setEndpoint(device.endpoint || "");
-      setAttributes(
-        device.attributes && device.attributes.length > 0
-          ? [...device.attributes]
-          : [],
-      );
-      setStaticAttributes(
-        device.static_attributes && device.static_attributes.length > 0
-          ? [...device.static_attributes]
-          : [],
-      );
-      setCommands(
-        device.commands && device.commands.length > 0
-          ? [...device.commands]
-          : [],
-      );
-      setActiveTab("general");
-    }
-  }, [device]);
 
   // Attribute helpers
   const handleAddAttribute = () => {
@@ -194,12 +201,8 @@ export function EditDeviceDialog({
     }
   };
 
-  if (!device) return null;
-
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl max-h-[90vh] flex flex-col p-0 overflow-hidden">
-        <form onSubmit={handleSubmit} className="flex flex-col h-full">
+    <form onSubmit={handleSubmit} className="flex flex-col h-full">
           {/* Header */}
           <DialogHeader className="p-6 pb-3 border-b">
             <div className="flex items-center gap-3">
@@ -663,8 +666,6 @@ export function EditDeviceDialog({
               )}
             </Button>
           </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+    </form>
   );
 }

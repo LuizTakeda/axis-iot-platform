@@ -22,7 +22,7 @@ import {
   Tag,
 } from "lucide-react";
 import type { NgsiLdEntityType } from "@repo/types/endpoints/ngsi-ld/entities.endpoints";
-import { parseEntityAttributes } from "./entity-card";
+import { parseEntityAttributes } from "./entity-utils";
 
 type Props = {
   entity: NgsiLdEntityType | null;

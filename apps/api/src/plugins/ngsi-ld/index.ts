@@ -6,6 +6,7 @@ import {
   getTenantSubscription,
   getTenantSubscriptionId,
 } from "./subscription.service.js";
+import { HttpError } from "@fastify/sensible";
 
 export type NGSILDSubcriptionAPI = {
   eventEmitter: EventEmitter;
@@ -43,9 +44,9 @@ async function ensureTenantSubscription(tenant: string): Promise<void> {
         // 2. If it does not exist, create it in the Context Broker
         const created = await createTenantSubscription(tenant);
         subscriptionList.set(tenant, created.id);
-      } catch (error: any) {
+      } catch (error) {
         // If 409 Conflict occurs (created concurrently in broker), record ID and resolve safely
-        if (error?.statusCode === 409) {
+        if (error instanceof HttpError && error?.statusCode === 409) {
           subscriptionList.set(tenant, getTenantSubscriptionId(tenant));
           return;
         }

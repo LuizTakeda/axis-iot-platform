@@ -58,7 +58,7 @@ export default fp(async (fastify: FastifyInstance) => {
         });
 
         request.user = payload as KeycloakUserPayload;
-      } catch (err: any) {
+      } catch {
         return reply.unauthorized();
       }
     },
@@ -79,7 +79,7 @@ export default fp(async (fastify: FastifyInstance) => {
         if (!roles.includes("system-admin")) {
           return reply.forbidden();
         }
-      } catch (err: any) {
+      } catch {
         return reply.unauthorized();
       }
     },
@@ -135,7 +135,7 @@ export default fp(async (fastify: FastifyInstance) => {
             `You do not have access to the '${tenant}' tenant.`,
           );
         }
-      } catch (err: any) {
+      } catch {
         return reply.unauthorized();
       }
     },

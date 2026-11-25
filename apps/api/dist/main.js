@@ -8,11 +8,12 @@ import swagger from '@fastify/swagger';
 import swaggerUI from '@fastify/swagger-ui';
 import { jsonSchemaTransform, validatorCompiler, serializerCompiler } from 'fastify-type-provider-zod';
 import cors$1 from '@fastify/cors';
+import { fastifySSE } from '@fastify/sse';
 import { PrismaPg } from '@prisma/adapter-pg';
 import 'node:process';
 import * as runtime from '@prisma/client/runtime/client';
 import { Pool } from 'pg';
-import fastifySensible from '@fastify/sensible';
+import sensible, { HttpError } from '@fastify/sensible';
 import 'dotenv/config';
 import z$1, { z } from 'zod';
 import fastifyCookie from '@fastify/cookie';
@@ -21,6 +22,8 @@ import 'simple-oauth2';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { EventEmitter } from 'events';
 import mqtt from 'mqtt';
+import { EventEmitter as EventEmitter$1 } from 'node:events';
+import { GetSubscriptionResponseSchema } from '@repo/types/endpoints/ngsi-ld/subscription.endpoints';
 
 var swaggerPlugin = fp(async (fastify) => {
   await fastify.register(swagger, {
@@ -65,7 +68,7 @@ var swaggerPlugin = fp(async (fastify) => {
     },
     staticCSP: true,
     transformStaticCSP: (header) => header,
-    transformSpecification: (swaggerObject, request, reply) => {
+    transformSpecification: (swaggerObject) => {
       return swaggerObject;
     },
     transformSpecificationClone: true
@@ -203,8 +206,8 @@ var oauth2Plugin = fp(async (fastify) => {
   });
 });
 
-var josePlugin = fp(async (fastify) => {
-  const KEYCLOAK_ISSUER = "https://auth.system.local/realms/iot-dashboard";
+var authPlugin = fp(async (fastify) => {
+  const KEYCLOAK_ISSUER = `https://auth.system.local/realms/${fastify.config.KEYCLOAK_REALM}`;
   const JWKS_URI = new URL(`${KEYCLOAK_ISSUER}/protocol/openid-connect/certs`);
   const JWKS = createRemoteJWKSet(JWKS_URI);
   fastify.decorate(
@@ -219,7 +222,7 @@ var josePlugin = fp(async (fastify) => {
           issuer: KEYCLOAK_ISSUER
         });
         request.user = payload;
-      } catch (err) {
+      } catch {
         return reply.unauthorized();
       }
     }
@@ -236,27 +239,46 @@ var josePlugin = fp(async (fastify) => {
         if (!roles.includes("system-admin")) {
           return reply.forbidden();
         }
-      } catch (err) {
+      } catch {
         return reply.unauthorized();
       }
     }
   );
   fastify.decorate(
-    "authenticateProject",
+    "authenticateFiwareTenantAccess",
     async (request, reply) => {
-      await fastify.authenticate(request, reply);
-      if (reply.sent) return;
-      const params = request.params;
-      const project = params?.project;
-      if (!project) {
-        return reply.badRequest("Project parameter (:project) is missing from URL.");
-      }
-      const userProjects = (request.user?.groups || []).filter(
-        (group) => typeof group === "string" && group.startsWith("project-")
-      );
-      const hasProjectAccess = userProjects.includes(project);
-      if (!hasProjectAccess) {
-        return reply.forbidden(`You do not have access to the '${project}' project.`);
+      try {
+        await fastify.authenticate(request, reply);
+        if (reply.sent) {
+          return;
+        }
+        const rawNgsiTenant = request.headers["ngsild-tenant"];
+        const rawFiwareService = request.headers["fiware-service"];
+        if (Array.isArray(rawNgsiTenant) || Array.isArray(rawFiwareService) || rawNgsiTenant?.includes(",") || rawFiwareService?.includes(",")) {
+          return reply.forbidden(
+            "Multiple tenant headers are not allowed in a single request."
+          );
+        }
+        if (rawNgsiTenant && rawFiwareService && rawNgsiTenant !== rawFiwareService) {
+          return reply.forbidden(
+            "Mismatched NGSILD-Tenant and Fiware-Service headers."
+          );
+        }
+        const tenant = rawNgsiTenant ?? rawFiwareService;
+        if (!tenant) {
+          return reply.forbidden(
+            "Missing FIWARE tenant header (ngsild-tenant or fiware-Service)."
+          );
+        }
+        const userGroups = request.user?.groups || [];
+        const hasTenantAccess = userGroups.includes(tenant);
+        if (!hasTenantAccess) {
+          return reply.forbidden(
+            `You do not have access to the '${tenant}' tenant.`
+          );
+        }
+      } catch {
+        return reply.unauthorized();
       }
     }
   );
@@ -287,17 +309,21 @@ const ListRolesResponseVerboseSchema = z$1.object({
       error: z$1.string().optional(),
       data: z$1.object({
         totalCount: z$1.number().int().nonnegative(),
-        roles: z$1.array(z$1.object({
-          rolename: z$1.string(),
-          textdescription: z$1.string().optional(),
-          allowwildcardsubs: z$1.boolean().optional(),
-          acls: z$1.array(z$1.object({
-            acltype: z$1.string(),
-            topic: z$1.string(),
-            priority: z$1.number().int(),
-            allow: z$1.boolean()
-          })).optional().default([])
-        }))
+        roles: z$1.array(
+          z$1.object({
+            rolename: z$1.string(),
+            textdescription: z$1.string().optional(),
+            allowwildcardsubs: z$1.boolean().optional(),
+            acls: z$1.array(
+              z$1.object({
+                acltype: z$1.string(),
+                topic: z$1.string(),
+                priority: z$1.number().int(),
+                allow: z$1.boolean()
+              })
+            ).optional().default([])
+          })
+        )
       }).optional()
     })
   )
@@ -316,12 +342,18 @@ const GetRoleResponseSchema = z$1.object({
           rolename: z$1.string(),
           textdescription: z$1.string().optional(),
           allowwildcardsubs: z$1.boolean().optional(),
-          acls: z$1.array(z$1.object({
-            acltype: z$1.string().describe("Permission type (e.g., publishClientSend, subscribePattern)"),
-            topic: z$1.string().describe("MQTT topic filter (e.g., '#', '+/sensors')"),
-            priority: z$1.number().describe("Rule priority"),
-            allow: z$1.boolean().describe("If true, allows access; if false, explicitly denies it")
-          })).default([])
+          acls: z$1.array(
+            z$1.object({
+              acltype: z$1.string().describe(
+                "Permission type (e.g., publishClientSend, subscribePattern)"
+              ),
+              topic: z$1.string().describe("MQTT topic filter (e.g., '#', '+/sensors')"),
+              priority: z$1.number().describe("Rule priority"),
+              allow: z$1.boolean().describe(
+                "If true, allows access; if false, explicitly denies it"
+              )
+            })
+          ).default([])
         })
       }).optional()
     })
@@ -332,54 +364,81 @@ const CreateRoleSchema = z$1.object({
   rolename: z$1.string().min(1, "Role name is required").max(100),
   textname: z$1.string().min(1).max(100).optional(),
   textdescription: z$1.string().min(1).max(256).optional(),
-  acls: z$1.array(z$1.object({
-    acltype: z$1.enum(["publishClientSend", "publishClientReceive", "subscribePattern", "unsubscribePattern"]).describe("Permission type (e.g., publishClientSend, subscribePattern)"),
-    topic: z$1.string().describe("MQTT topic filter (e.g., '#', '+/sensors')"),
-    priority: z$1.number().describe("Rule priority"),
-    allow: z$1.boolean().describe("If true, allows access; if false, explicitly denies it")
-  })).optional()
+  acls: z$1.array(
+    z$1.object({
+      acltype: z$1.enum([
+        "publishClientSend",
+        "publishClientReceive",
+        "subscribePattern",
+        "unsubscribePattern"
+      ]).describe(
+        "Permission type (e.g., publishClientSend, subscribePattern)"
+      ),
+      topic: z$1.string().describe("MQTT topic filter (e.g., '#', '+/sensors')"),
+      priority: z$1.number().describe("Rule priority"),
+      allow: z$1.boolean().describe("If true, allows access; if false, explicitly denies it")
+    })
+  ).optional()
 });
 const CreateRoleResponseSchema = z$1.object({
-  responses: z$1.array(z$1.object({
-    command: z$1.literal("createRole"),
-    error: z$1.string().optional()
-  }))
+  responses: z$1.array(
+    z$1.object({
+      command: z$1.literal("createRole"),
+      error: z$1.string().optional()
+    })
+  )
 });
 const DeleteRoleSchema = z$1.object({
   command: z$1.literal("deleteRole"),
   rolename: z$1.string().min(1).max(100)
 });
 const DeleteRoleResponseSchema = z$1.object({
-  responses: z$1.array(z$1.object({
-    command: z$1.literal("deleteRole"),
-    error: z$1.string().optional()
-  }))
+  responses: z$1.array(
+    z$1.object({
+      command: z$1.literal("deleteRole"),
+      error: z$1.string().optional()
+    })
+  )
 });
 const AddRoleACLSchema = z$1.object({
   command: z$1.literal("addRoleACL"),
   rolename: z$1.string().min(1).max(100),
-  "acltype": z$1.enum(["publishClientSend", "publishClientReceive", "subscribePattern", "unsubscribePattern"]).describe("Permission type (e.g., publishClientSend, subscribePattern)"),
+  acltype: z$1.enum([
+    "publishClientSend",
+    "publishClientReceive",
+    "subscribePattern",
+    "unsubscribePattern"
+  ]).describe("Permission type (e.g., publishClientSend, subscribePattern)"),
   topic: z$1.string().describe("MQTT topic filter (e.g., '#', '+/sensors')"),
   priority: z$1.number().describe("Rule priority"),
   allow: z$1.boolean().describe("If true, allows access; if false, explicitly denies it")
 });
 const AddRoleACLResponseSchema = z$1.object({
-  responses: z$1.array(z$1.object({
-    command: z$1.literal("addRoleACL"),
-    error: z$1.string().optional()
-  }))
+  responses: z$1.array(
+    z$1.object({
+      command: z$1.literal("addRoleACL"),
+      error: z$1.string().optional()
+    })
+  )
 });
 const RemoveRoleACLSchema = z$1.object({
   command: z$1.literal("removeRoleACL"),
   rolename: z$1.string().min(1).max(100),
-  acltype: z$1.enum(["publishClientSend", "publishClientReceive", "subscribePattern", "unsubscribePattern"]).describe("Permission type"),
+  acltype: z$1.enum([
+    "publishClientSend",
+    "publishClientReceive",
+    "subscribePattern",
+    "unsubscribePattern"
+  ]).describe("Permission type"),
   topic: z$1.string().min(1).describe("MQTT topic filter")
 });
 const RemoveRoleACLResponseSchema = z$1.object({
-  responses: z$1.array(z$1.object({
-    command: z$1.literal("removeRoleACL"),
-    error: z$1.string().optional()
-  }))
+  responses: z$1.array(
+    z$1.object({
+      command: z$1.literal("removeRoleACL"),
+      error: z$1.string().optional()
+    })
+  )
 });
 
 const ListClientsSchema = z.object({
@@ -763,8 +822,10 @@ async function createCommandsQueue(client, messageEventStream) {
       if (timeout) clearTimeout(timeout);
       try {
         commandsItem.resolve(JSON.parse(str));
-      } catch (err) {
-        commandsItem.reject(new Error("Failed to parse JSON response from broker"));
+      } catch {
+        commandsItem.reject(
+          new Error("Failed to parse JSON response from broker")
+        );
       }
       isProcessing = false;
       processQueue();
@@ -776,20 +837,25 @@ async function createCommandsQueue(client, messageEventStream) {
       processQueue();
     }, 1e3 * 10);
     messageEventStream.once(RESP_TOPIC, messageCallback);
-    client.publish(CMD_TOPIC, JSON.stringify(commandsItem.payload), { qos: 1 }, (err) => {
-      if (err) {
-        if (timeout) clearTimeout(timeout);
-        messageEventStream.removeListener(RESP_TOPIC, messageCallback);
-        commandsItem.reject(err);
-        isProcessing = false;
-        processQueue();
+    client.publish(
+      CMD_TOPIC,
+      JSON.stringify(commandsItem.payload),
+      { qos: 1 },
+      (err) => {
+        if (err) {
+          if (timeout) clearTimeout(timeout);
+          messageEventStream.removeListener(RESP_TOPIC, messageCallback);
+          commandsItem.reject(err);
+          isProcessing = false;
+          processQueue();
+        }
       }
-    });
+    );
   };
   return {
     /**
      * Validates and pushes a new command payload into the processing queue.
-     * 
+     *
      * @param {DSCommandsType} payload - The dynamic security commands payload.
      * @returns {Promise<any>} A promise that resolves with the broker's response.
      * @throws {Error} If the provided payload fails Zod validation.
@@ -807,7 +873,10 @@ async function createCommandsQueue(client, messageEventStream) {
   };
 }
 async function createDynamicSecurityAPI(client, messageEventStream) {
-  const { sendCommands } = await createCommandsQueue(client, messageEventStream);
+  const { sendCommands } = await createCommandsQueue(
+    client,
+    messageEventStream
+  );
   const listRoles = async (payload) => {
     const response = await sendCommands({
       commands: [{ command: "listRoles", verbose: false, ...payload }]
@@ -851,79 +920,117 @@ async function createDynamicSecurityAPI(client, messageEventStream) {
     return RemoveRoleACLResponseSchema.parse(response);
   };
   const listClients = async (payload) => {
-    const response = await sendCommands({ commands: [{ command: "listClients", verbose: false, ...payload }] });
+    const response = await sendCommands({
+      commands: [{ command: "listClients", verbose: false, ...payload }]
+    });
     return ListClientsResponseSchema.parse(response);
   };
   const listClientsVerbose = async (payload) => {
-    const response = await sendCommands({ commands: [{ command: "listClients", verbose: true, ...payload }] });
+    const response = await sendCommands({
+      commands: [{ command: "listClients", verbose: true, ...payload }]
+    });
     return ListClientsVerboseResponseSchema.parse(response);
   };
   const getClient = async (payload) => {
-    const response = await sendCommands({ commands: [{ command: "getClient", ...payload }] });
+    const response = await sendCommands({
+      commands: [{ command: "getClient", ...payload }]
+    });
     return GetClientResponseSchema.parse(response);
   };
   const createClient = async (payload) => {
-    const response = await sendCommands({ commands: [{ command: "createClient", ...payload }] });
+    const response = await sendCommands({
+      commands: [{ command: "createClient", ...payload }]
+    });
     return CreateClientResponseSchema.parse(response);
   };
   const deleteClient = async (payload) => {
-    const response = await sendCommands({ commands: [{ command: "deleteClient", ...payload }] });
+    const response = await sendCommands({
+      commands: [{ command: "deleteClient", ...payload }]
+    });
     return DeleteClientResponseSchema.parse(response);
   };
   const enableClient = async (payload) => {
-    const response = await sendCommands({ commands: [{ command: "enableClient", ...payload }] });
+    const response = await sendCommands({
+      commands: [{ command: "enableClient", ...payload }]
+    });
     return EnableClientResponseSchema.parse(response);
   };
   const disableClient = async (payload) => {
-    const response = await sendCommands({ commands: [{ command: "disableClient", ...payload }] });
+    const response = await sendCommands({
+      commands: [{ command: "disableClient", ...payload }]
+    });
     return DisableClientResponseSchema.parse(response);
   };
   const setClientPassword = async (payload) => {
-    const response = await sendCommands({ commands: [{ command: "setClientPassword", ...payload }] });
+    const response = await sendCommands({
+      commands: [{ command: "setClientPassword", ...payload }]
+    });
     return SetClientPasswordResponseSchema.parse(response);
   };
   const addClientRole = async (payload) => {
-    const response = await sendCommands({ commands: [{ command: "addClientRole", ...payload }] });
+    const response = await sendCommands({
+      commands: [{ command: "addClientRole", ...payload }]
+    });
     return AddClientRoleResponseSchema.parse(response);
   };
   const removeClientRole = async (payload) => {
-    const response = await sendCommands({ commands: [{ command: "removeClientRole", ...payload }] });
+    const response = await sendCommands({
+      commands: [{ command: "removeClientRole", ...payload }]
+    });
     return RemoveClientRoleResponseSchema.parse(response);
   };
   const listGroups = async (payload) => {
-    const response = await sendCommands({ commands: [{ command: "listGroups", verbose: false, ...payload }] });
+    const response = await sendCommands({
+      commands: [{ command: "listGroups", verbose: false, ...payload }]
+    });
     return ListGroupsResponseSchema.parse(response);
   };
   const listGroupsVerbose = async (payload) => {
-    const response = await sendCommands({ commands: [{ command: "listGroups", verbose: true, ...payload }] });
+    const response = await sendCommands({
+      commands: [{ command: "listGroups", verbose: true, ...payload }]
+    });
     return ListGroupsVerboseResponseSchema.parse(response);
   };
   const getGroup = async (payload) => {
-    const response = await sendCommands({ commands: [{ command: "getGroup", ...payload }] });
+    const response = await sendCommands({
+      commands: [{ command: "getGroup", ...payload }]
+    });
     return GetGroupResponseSchema.parse(response);
   };
   const createGroup = async (payload) => {
-    const response = await sendCommands({ commands: [{ command: "createGroup", ...payload }] });
+    const response = await sendCommands({
+      commands: [{ command: "createGroup", ...payload }]
+    });
     return CreateGroupResponseSchema.parse(response);
   };
   const deleteGroup = async (payload) => {
-    const response = await sendCommands({ commands: [{ command: "deleteGroup", ...payload }] });
+    const response = await sendCommands({
+      commands: [{ command: "deleteGroup", ...payload }]
+    });
     return DeleteGroupResponseSchema.parse(response);
   };
   const addGroupClient = async (payload) => {
-    const response = await sendCommands({ commands: [{ command: "addGroupClient", ...payload }] });
+    const response = await sendCommands({
+      commands: [{ command: "addGroupClient", ...payload }]
+    });
     return AddGroupClientResponseSchema.parse(response);
   };
   const removeGroupClient = async (payload) => {
-    const response = await sendCommands({ commands: [{ command: "removeGroupClient", ...payload }] });
+    const response = await sendCommands({
+      commands: [{ command: "removeGroupClient", ...payload }]
+    });
     return RemoveGroupClientResponseSchema.parse(response);
   };
   const addGroupRole = async (payload) => {
-    const response = await sendCommands({ commands: [{ command: "addGroupRole", ...payload }] });
+    const response = await sendCommands({
+      commands: [{ command: "addGroupRole", ...payload }]
+    });
     return AddGroupRoleResponseSchema.parse(response);
   };
   const removeGroupRole = async (payload) => {
-    const response = await sendCommands({ commands: [{ command: "removeGroupRole", ...payload }] });
+    const response = await sendCommands({
+      commands: [{ command: "removeGroupRole", ...payload }]
+    });
     return RemoveGroupRoleResponseSchema.parse(response);
   };
   return {
@@ -1019,10 +1126,154 @@ var mqttPlugin = fp(async (fastify) => {
       logger.info("Successfully subscribed to global topics");
     });
   }
-  const dynamicSecurityAPI = await createDynamicSecurityAPI(mqttClient, messageEvents);
+  const dynamicSecurityAPI = await createDynamicSecurityAPI(
+    mqttClient,
+    messageEvents
+  );
   fastify.decorate("mqtt", {
     client: mqttClient,
     dynsec: dynamicSecurityAPI
+  });
+});
+
+const httpErrors = sensible.httpErrors;
+const DEFAULT_ORION_BASE_URL = process.env.ORION_LD_URL || "http://orion-ld:1026";
+const DEFAULT_WEBHOOK_URL = process.env.NGSI_LD_WEBHOOK_URL || "http://workspace:3000/api/ngsi-ld/subscription";
+const SUBSCRIPTIONS_BASE_PATH = "/ngsi-ld/v1/subscriptions";
+async function translateBrokerError(response) {
+  const status = response.status;
+  const data = await response.json().catch(() => null);
+  const message = data?.detail || data?.message || data?.description || data?.title || response.statusText || `Context Broker HTTP Error ${status}`;
+  if (status >= 400 && status < 600) {
+    throw httpErrors.getHttpError(status, message);
+  }
+  throw httpErrors.internalServerError(
+    `Unexpected Context Broker Error (${status}): ${message}`
+  );
+}
+function getTenantSubscriptionId(tenant) {
+  return `urn:ngsi-ld:Subscription:${tenant}:all-entities`;
+}
+function getTenantHeaders(tenant) {
+  return {
+    "NGSILD-Tenant": tenant,
+    "Fiware-Service": tenant,
+    Accept: "application/json",
+    "Content-Type": "application/json"
+  };
+}
+async function getTenantSubscription(tenant, baseUrl = DEFAULT_ORION_BASE_URL) {
+  const subscriptionId = getTenantSubscriptionId(tenant);
+  const url = new URL(
+    `${SUBSCRIPTIONS_BASE_PATH}/${encodeURIComponent(subscriptionId)}`,
+    baseUrl
+  );
+  const response = await fetch(url.toString(), {
+    method: "GET",
+    headers: getTenantHeaders(tenant)
+  });
+  if (response.status === 404) {
+    return null;
+  }
+  if (!response.ok) {
+    await translateBrokerError(response);
+  }
+  const data = await response.json().catch(() => null);
+  const validation = GetSubscriptionResponseSchema.safeParse(data);
+  if (!validation.success) {
+    throw httpErrors.internalServerError(
+      "Context Broker response did not match expected subscription schema contract"
+    );
+  }
+  return validation.data;
+}
+async function getTenantTypes(tenant, baseUrl = DEFAULT_ORION_BASE_URL) {
+  const url = new URL("/ngsi-ld/v1/types", baseUrl);
+  const response = await fetch(url.toString(), {
+    method: "GET",
+    headers: getTenantHeaders(tenant)
+  });
+  if (!response.ok) {
+    return ["Device"];
+  }
+  const data = await response.json().catch(() => null);
+  const list = Array.isArray(data?.typeList) ? data.typeList : [];
+  return list.length > 0 ? list : ["Device"];
+}
+async function createTenantSubscription(tenant, baseUrl = DEFAULT_ORION_BASE_URL) {
+  const subscriptionId = getTenantSubscriptionId(tenant);
+  const url = new URL(SUBSCRIPTIONS_BASE_PATH, baseUrl);
+  const types = await getTenantTypes(tenant, baseUrl);
+  const entities = types.map((type) => ({ type }));
+  const payload = {
+    id: subscriptionId,
+    type: "Subscription",
+    subscriptionName: `realtime-subscription-${tenant}`,
+    description: `Realtime updates stream for all entities of tenant ${tenant}`,
+    entities,
+    notification: {
+      endpoint: {
+        uri: DEFAULT_WEBHOOK_URL,
+        accept: "application/json"
+      },
+      format: "keyValues"
+    }
+  };
+  const response = await fetch(url.toString(), {
+    method: "POST",
+    headers: getTenantHeaders(tenant),
+    body: JSON.stringify(payload)
+  });
+  if (!response.ok) {
+    await translateBrokerError(response);
+  }
+  const location = response.headers.get("location");
+  return {
+    id: subscriptionId,
+    location
+  };
+}
+
+const subscriptionList = /* @__PURE__ */ new Map();
+const inFlightRequests = /* @__PURE__ */ new Map();
+async function ensureTenantSubscription(tenant) {
+  if (subscriptionList.has(tenant)) {
+    return;
+  }
+  let inFlight = inFlightRequests.get(tenant);
+  if (!inFlight) {
+    inFlight = (async () => {
+      try {
+        const existing = await getTenantSubscription(tenant);
+        if (existing?.id) {
+          subscriptionList.set(tenant, existing.id);
+          return;
+        }
+        const created = await createTenantSubscription(tenant);
+        subscriptionList.set(tenant, created.id);
+      } catch (error) {
+        if (error instanceof HttpError && error?.statusCode === 409) {
+          subscriptionList.set(tenant, getTenantSubscriptionId(tenant));
+          return;
+        }
+        throw error;
+      } finally {
+        inFlightRequests.delete(tenant);
+      }
+    })();
+    inFlightRequests.set(tenant, inFlight);
+  }
+  await inFlight;
+}
+var ngsiLdPlugin = fp(async (fastify) => {
+  const ngsiLdSubcription = {
+    eventEmitter: new EventEmitter$1(),
+    ensureTenantSubscription
+  };
+  ngsiLdSubcription.eventEmitter.setMaxListeners(100);
+  fastify.decorate("ngsiLd", { subscription: ngsiLdSubcription });
+  fastify.addHook("onClose", async () => {
+    fastify.ngsiLd.subscription.eventEmitter.removeAllListeners();
   });
 });
 
@@ -1030,33 +1281,45 @@ const __filename$1 = fileURLToPath(import.meta.url);
 const __dirname$1 = dirname(__filename$1);
 const isDevelopment = process.env.NODE_ENV !== "production";
 const app = fastify({
+  disableRequestLogging: true,
   logger: {
     name: "app"
   }
 }).withTypeProvider();
 app.setValidatorCompiler(validatorCompiler);
 app.setSerializerCompiler(serializerCompiler);
+app.addHook("onResponse", (request, reply, done) => {
+  const responseTime = `${(reply.elapsedTime || 0).toFixed(2)}ms`;
+  request.log.info(
+    `${request.method} ${request.url} ${reply.statusCode} - ${responseTime}`
+  );
+  done();
+});
 await app.register(envPlugin);
-await app.register(fastifySensible);
+await app.register(sensible);
 await app.register(cors);
 await app.register(oauth2Plugin);
-await app.register(josePlugin);
+await app.register(authPlugin);
+await app.register(fastifySSE);
 await app.register(mqttPlugin);
 await app.register(prismaPlugin);
+await app.register(ngsiLdPlugin);
 if (isDevelopment) {
   await app.register(swaggerPlugin);
 }
-app.setErrorHandler((error, request, reply) => {
-  request.log.error(error);
-  if (error.statusCode) {
-    return reply.send(error);
+app.setErrorHandler(
+  (error, request, reply) => {
+    request.log.error(error);
+    if (error.statusCode) {
+      return reply.send(error);
+    }
+    return reply.status(500).send({
+      statusCode: 500,
+      error: "Internal Server Error",
+      message: "Internal server error, contact staf"
+    });
   }
-  return reply.status(500).send({
-    statusCode: 500,
-    error: "Internal Server Error",
-    message: "Internal server error, contact staf"
-  });
-});
+);
 await app.register(autoload, {
   dir: join(__dirname$1, "routes"),
   options: { prefix: "/api" },

@@ -10,7 +10,7 @@ import { cn, formatProjectString } from "@/lib/utils";
 import {
   parseEntityAttributes,
   type ParsedAttribute,
-} from "@/pages/dashboard/project/entities/components/entity-card";
+} from "@/pages/dashboard/project/entities/components/entity-utils";
 import {
   Activity,
   ArrowLeft,
@@ -850,32 +850,6 @@ export default function ProjectEntityTelemetryPage() {
     });
   }, [currentAttributes, temporalEntity]);
 
-  const handleSelectPreset = (newPreset: TimeSlicePreset) => {
-    setPreset(newPreset);
-    setReferenceNow(Date.now());
-  };
-
-  const handleRefreshAll = async () => {
-    setReferenceNow(Date.now());
-    await Promise.all([mutateEntity(), mutateTemporal()]);
-  };
-
-  const handleCopyEntityId = async () => {
-    if (!entityId) return;
-    await navigator.clipboard.writeText(entityId);
-    setCopiedId(true);
-    setTimeout(() => setCopiedId(false), 2000);
-  };
-
-  if (!project) return null;
-
-  const projectTitle = formatProjectString(project);
-
-  // Friendly short name & type extraction
-  const shortId = entityId.includes(":")
-    ? entityId.split(":").slice(-2).join(":")
-    : entityId;
-
   const entityTypeDisplay = useMemo(() => {
     if (currentEntity?.type) {
       return Array.isArray(currentEntity.type)
@@ -894,6 +868,32 @@ export default function ProjectEntityTelemetryPage() {
     }
     return "Entity";
   }, [currentEntity, temporalEntity, entityId]);
+
+  const handleSelectPreset = (newPreset: TimeSlicePreset) => {
+    setPreset(newPreset);
+    setReferenceNow(() => Date.now());
+  };
+
+  const handleRefreshAll = async () => {
+    setReferenceNow(() => Date.now());
+    await Promise.all([mutateEntity(), mutateTemporal()]);
+  };
+
+  const handleCopyEntityId = async () => {
+    if (!entityId) return;
+    await navigator.clipboard.writeText(entityId);
+    setCopiedId(true);
+    setTimeout(() => setCopiedId(false), 2000);
+  };
+
+  if (!project) return null;
+
+  const projectTitle = formatProjectString(project);
+
+  // Friendly short name & type extraction
+  const shortId = entityId.includes(":")
+    ? entityId.split(":").slice(-2).join(":")
+    : entityId;
 
   return (
     <div>

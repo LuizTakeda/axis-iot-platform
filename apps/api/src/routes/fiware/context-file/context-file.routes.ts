@@ -38,15 +38,18 @@ const contextFileRoutes: FastifyPluginAsyncZod = async (fastify) => {
 
         return {
           name: contextFile.name,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           file: contextFile.file as Record<string, any>,
           createdAt: contextFile.createdAt,
           updatedAt: contextFile.updatedAt,
         };
       } catch (error) {
         request.log.error(error, "Failed to retrieve global context file");
-        return reply.internalServerError("Failed to retrieve global context file");
+        return reply.internalServerError(
+          "Failed to retrieve global context file",
+        );
       }
-    }
+    },
   );
 
   // ==========================================
@@ -58,9 +61,12 @@ const contextFileRoutes: FastifyPluginAsyncZod = async (fastify) => {
       schema: {
         tags: ["FIWARE Context File", "FIWARE"],
         summary: "Serve Raw Global JSON-LD Context File",
-        description: "Serves the raw global JSON-LD @context file with application/ld+json content type for NGSI-LD brokers and IoT clients.",
+        description:
+          "Serves the raw global JSON-LD @context file with application/ld+json content type for NGSI-LD brokers and IoT clients.",
         response: {
-          200: z.record(z.string(), z.any()).describe("Raw JSON-LD @context object"),
+          200: z
+            .record(z.string(), z.any())
+            .describe("Raw JSON-LD @context object"),
           404: HttpErrorSchema,
           500: HttpErrorSchema,
         },
@@ -82,9 +88,11 @@ const contextFileRoutes: FastifyPluginAsyncZod = async (fastify) => {
         return contextFile.file;
       } catch (error) {
         request.log.error(error, "Failed to serve raw global context file");
-        return reply.internalServerError("Failed to serve raw global context file");
+        return reply.internalServerError(
+          "Failed to serve raw global context file",
+        );
       }
-    }
+    },
   );
 
   // ==========================================
@@ -128,7 +136,7 @@ const contextFileRoutes: FastifyPluginAsyncZod = async (fastify) => {
         request.log.error(error, "Failed to save global context file");
         return reply.internalServerError("Failed to save global context file");
       }
-    }
+    },
   );
 
   // ==========================================
@@ -169,9 +177,11 @@ const contextFileRoutes: FastifyPluginAsyncZod = async (fastify) => {
         };
       } catch (error) {
         request.log.error(error, "Failed to delete global context file");
-        return reply.internalServerError("Failed to delete global context file");
+        return reply.internalServerError(
+          "Failed to delete global context file",
+        );
       }
-    }
+    },
   );
 };
 
