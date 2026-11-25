@@ -6,7 +6,7 @@
   "scripts": {
     "build": "pnpm -r build",
     "dev": "pnpm -r --parallel dev",
-    "test": "pnpm -r test",
+    "test": "pnpm -r --parallel test",
     "clean": "pnpm -r --parallel exec rm -rf dist"
   },
   "keywords": [],

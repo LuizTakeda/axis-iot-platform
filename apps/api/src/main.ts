@@ -18,7 +18,7 @@ import prismaPlugin from "@/plugins/prisma.js";
 import fastifySensible from "@fastify/sensible";
 import envPlugin from "@plugins/env.js";
 import oauth2Plugin from "@plugins/oauth2.js";
-import josePlugin from "@plugins/jose.js";
+import authPlugin from "@/plugins/auth/auth.js";
 import mqttPlugin from "@/plugins/mqtt/index.js";
 import ngsiLdPlugin from "@/plugins/ngsi-ld/index.js";
 
@@ -54,7 +54,7 @@ await app.register(envPlugin);
 await app.register(fastifySensible);
 await app.register(cors);
 await app.register(oauth2Plugin);
-await app.register(josePlugin);
+await app.register(authPlugin);
 await app.register(fastifySSE);
 await app.register(mqttPlugin);
 await app.register(prismaPlugin);
