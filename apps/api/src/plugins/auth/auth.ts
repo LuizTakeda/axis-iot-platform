@@ -16,7 +16,7 @@ declare module "fastify" {
       request: FastifyRequest,
       reply: FastifyReply,
     ) => Promise<void>;
-    authenticateProject: (
+    authenticateFiwareTenantAccess: (
       request: FastifyRequest,
       reply: FastifyReply,
     ) => Promise<void>;
@@ -86,33 +86,57 @@ export default fp(async (fastify: FastifyInstance) => {
   );
 
   fastify.decorate(
-    "authenticateProject",
+    "authenticateFiwareTenantAccess",
     async (request: FastifyRequest, reply: FastifyReply) => {
-      await fastify.authenticate(request, reply);
+      try {
+        await fastify.authenticate(request, reply);
 
-      if (reply.sent) return;
+        if (reply.sent) {
+          return;
+        }
 
-      const params = request.params as Record<string, string> | undefined;
+        const rawNgsiTenant = request.headers["ngsild-tenant"];
+        const rawFiwareService = request.headers["fiware-service"];
 
-      const project = params?.project;
+        if (
+          Array.isArray(rawNgsiTenant) ||
+          Array.isArray(rawFiwareService) ||
+          rawNgsiTenant?.includes(",") ||
+          rawFiwareService?.includes(",")
+        ) {
+          return reply.forbidden(
+            "Multiple tenant headers are not allowed in a single request.",
+          );
+        }
 
-      if (!project) {
-        return reply.badRequest(
-          "Project parameter (:project) is missing from URL.",
-        );
-      }
+        if (
+          rawNgsiTenant &&
+          rawFiwareService &&
+          rawNgsiTenant !== rawFiwareService
+        ) {
+          return reply.forbidden(
+            "Mismatched NGSILD-Tenant and Fiware-Service headers.",
+          );
+        }
 
-      const userProjects = (request.user?.groups || []).filter(
-        (group): group is string =>
-          typeof group === "string" && group.startsWith("project-"),
-      );
+        const tenant = rawNgsiTenant ?? rawFiwareService;
 
-      const hasProjectAccess = userProjects.includes(project);
+        if (!tenant) {
+          return reply.forbidden(
+            "Missing FIWARE tenant header (ngsild-tenant or fiware-Service).",
+          );
+        }
 
-      if (!hasProjectAccess) {
-        return reply.forbidden(
-          `You do not have access to the '${project}' project.`,
-        );
+        const userGroups = request.user?.groups || [];
+        const hasTenantAccess = userGroups.includes(tenant);
+
+        if (!hasTenantAccess) {
+          return reply.forbidden(
+            `You do not have access to the '${tenant}' tenant.`,
+          );
+        }
+      } catch (err: any) {
+        return reply.unauthorized();
       }
     },
   );
