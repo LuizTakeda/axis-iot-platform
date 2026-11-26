@@ -16,9 +16,9 @@ import fastifySensible from "@fastify/sensible";
 import envPlugin from "@plugins/env.js";
 import oauth2Plugin from "@plugins/oauth2.js";
 import authPlugin from "@/plugins/auth/auth.js";
-import mqttPlugin from "@/plugins/mqtt/index.js";
 import ngsiLdPlugin from "@/plugins/ngsi-ld/index.js";
 import apiRoutes from "@/routes/index.js";
+import dynsecPlugin from "./plugins/dynsec.js";
 
 const isDevelopment = process.env.NODE_ENV !== "production";
 
@@ -51,7 +51,7 @@ await app.register(cors);
 await app.register(oauth2Plugin);
 await app.register(authPlugin);
 await app.register(fastifySSE);
-await app.register(mqttPlugin);
+await app.register(dynsecPlugin);
 await app.register(prismaPlugin);
 await app.register(ngsiLdPlugin);
 

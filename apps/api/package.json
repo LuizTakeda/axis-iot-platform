@@ -28,10 +28,10 @@
     "@prisma/client": "^7.9.0",
     "dotenv": "^17.4.2",
     "fastify": "^5.10.0",
+    "fastify-mosquitto-dynsec": "^1.0.0",
     "fastify-plugin": "^6.0.0",
     "fastify-type-provider-zod": "^7.0.0",
     "jose": "^6.2.8",
-    "mqtt": "^5.15.2",
     "pg": "^8.22.0",
     "pino": "^10.3.1",
     "prisma": "^7.9.0",
@@ -39,8 +39,8 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@repo/types": "workspace:*",
     "@eslint/js": "^10.0.1",
+    "@repo/types": "workspace:*",
     "@types/node": "^24.13.3",
     "@types/pg": "^8.20.0",
     "@types/simple-oauth2": "^5.0.8",
