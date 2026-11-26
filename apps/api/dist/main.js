@@ -171,7 +171,10 @@ const envSchema = z.object({
   KEYCLOAK_REALM: z.string(),
   MQTT_BROKER_URL: z.string(),
   MQTT_BROKER_USERNAME: z.string(),
-  MQTT_BROKER_PASSWORD: z.string()
+  MQTT_BROKER_PASSWORD: z.string(),
+  INTERNAL_API_URL: z.url().default("http://workspace:3000"),
+  ORION_LD_URL: z.url().default("http://orion-ld:1026"),
+  NGSI_LD_WEBHOOK_URL: z.url().optional()
 });
 var envPlugin = fp(async (fastify) => {
   const result = envSchema.safeParse(process.env);
@@ -1138,7 +1141,8 @@ var mqttPlugin = fp(async (fastify) => {
 
 const httpErrors = sensible.httpErrors;
 const DEFAULT_ORION_BASE_URL = process.env.ORION_LD_URL || "http://orion-ld:1026";
-const DEFAULT_WEBHOOK_URL = process.env.NGSI_LD_WEBHOOK_URL || "http://workspace:3000/api/ngsi-ld/subscription";
+const DEFAULT_INTERNAL_API_URL = process.env.INTERNAL_API_URL || "http://workspace:3000";
+const DEFAULT_WEBHOOK_URL = process.env.NGSI_LD_WEBHOOK_URL || `${DEFAULT_INTERNAL_API_URL.replace(/\/$/, "")}/api/ngsi-ld/subscription`;
 const SUBSCRIPTIONS_BASE_PATH = "/ngsi-ld/v1/subscriptions";
 async function translateBrokerError(response) {
   const status = response.status;
@@ -1200,7 +1204,7 @@ async function getTenantTypes(tenant, baseUrl = DEFAULT_ORION_BASE_URL) {
   const list = Array.isArray(data?.typeList) ? data.typeList : [];
   return list.length > 0 ? list : ["Device"];
 }
-async function createTenantSubscription(tenant, baseUrl = DEFAULT_ORION_BASE_URL) {
+async function createTenantSubscription(tenant, baseUrl = DEFAULT_ORION_BASE_URL, webhookUrl = DEFAULT_WEBHOOK_URL) {
   const subscriptionId = getTenantSubscriptionId(tenant);
   const url = new URL(SUBSCRIPTIONS_BASE_PATH, baseUrl);
   const types = await getTenantTypes(tenant, baseUrl);
@@ -1213,7 +1217,7 @@ async function createTenantSubscription(tenant, baseUrl = DEFAULT_ORION_BASE_URL
     entities,
     notification: {
       endpoint: {
-        uri: DEFAULT_WEBHOOK_URL,
+        uri: webhookUrl,
         accept: "application/json"
       },
       format: "keyValues"
@@ -1236,7 +1240,7 @@ async function createTenantSubscription(tenant, baseUrl = DEFAULT_ORION_BASE_URL
 
 const subscriptionList = /* @__PURE__ */ new Map();
 const inFlightRequests = /* @__PURE__ */ new Map();
-async function ensureTenantSubscription(tenant) {
+async function ensureTenantSubscription(tenant, orionBaseUrl, webhookUrl) {
   if (subscriptionList.has(tenant)) {
     return;
   }
@@ -1244,12 +1248,16 @@ async function ensureTenantSubscription(tenant) {
   if (!inFlight) {
     inFlight = (async () => {
       try {
-        const existing = await getTenantSubscription(tenant);
+        const existing = await getTenantSubscription(tenant, orionBaseUrl);
         if (existing?.id) {
           subscriptionList.set(tenant, existing.id);
           return;
         }
-        const created = await createTenantSubscription(tenant);
+        const created = await createTenantSubscription(
+          tenant,
+          orionBaseUrl,
+          webhookUrl
+        );
         subscriptionList.set(tenant, created.id);
       } catch (error) {
         if (error instanceof HttpError && error?.statusCode === 409) {
@@ -1266,9 +1274,12 @@ async function ensureTenantSubscription(tenant) {
   await inFlight;
 }
 var ngsiLdPlugin = fp(async (fastify) => {
+  const internalApiUrl = (fastify.config?.INTERNAL_API_URL || "http://workspace:3000").replace(/\/$/, "");
+  const orionBaseUrl = fastify.config?.ORION_LD_URL || "http://orion-ld:1026";
+  const webhookUrl = fastify.config?.NGSI_LD_WEBHOOK_URL || `${internalApiUrl}/api/ngsi-ld/subscription`;
   const ngsiLdSubcription = {
     eventEmitter: new EventEmitter$1(),
-    ensureTenantSubscription
+    ensureTenantSubscription: (tenant) => ensureTenantSubscription(tenant, orionBaseUrl, webhookUrl)
   };
   ngsiLdSubcription.eventEmitter.setMaxListeners(100);
   fastify.decorate("ngsiLd", { subscription: ngsiLdSubcription });

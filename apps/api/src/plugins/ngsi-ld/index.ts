@@ -24,7 +24,11 @@ declare module "fastify" {
 const subscriptionList = new Map<string, string>();
 const inFlightRequests = new Map<string, Promise<void>>();
 
-async function ensureTenantSubscription(tenant: string): Promise<void> {
+async function ensureTenantSubscription(
+  tenant: string,
+  orionBaseUrl?: string,
+  webhookUrl?: string,
+): Promise<void> {
   if (subscriptionList.has(tenant)) {
     return;
   }
@@ -35,14 +39,18 @@ async function ensureTenantSubscription(tenant: string): Promise<void> {
     inFlight = (async () => {
       try {
         // 1. Check if subscription already exists in the Context Broker
-        const existing = await getTenantSubscription(tenant);
+        const existing = await getTenantSubscription(tenant, orionBaseUrl);
         if (existing?.id) {
           subscriptionList.set(tenant, existing.id);
           return;
         }
 
         // 2. If it does not exist, create it in the Context Broker
-        const created = await createTenantSubscription(tenant);
+        const created = await createTenantSubscription(
+          tenant,
+          orionBaseUrl,
+          webhookUrl,
+        );
         subscriptionList.set(tenant, created.id);
       } catch (error) {
         // If 409 Conflict occurs (created concurrently in broker), record ID and resolve safely
@@ -63,9 +71,18 @@ async function ensureTenantSubscription(tenant: string): Promise<void> {
 }
 
 export default fp(async (fastify: FastifyInstance) => {
+  const internalApiUrl = (
+    fastify.config?.INTERNAL_API_URL || "http://workspace:3000"
+  ).replace(/\/$/, "");
+  const orionBaseUrl = fastify.config?.ORION_LD_URL || "http://orion-ld:1026";
+  const webhookUrl =
+    fastify.config?.NGSI_LD_WEBHOOK_URL ||
+    `${internalApiUrl}/api/ngsi-ld/subscription`;
+
   const ngsiLdSubcription: NGSILDSubcriptionAPI = {
     eventEmitter: new EventEmitter(),
-    ensureTenantSubscription,
+    ensureTenantSubscription: (tenant: string) =>
+      ensureTenantSubscription(tenant, orionBaseUrl, webhookUrl),
   };
 
   ngsiLdSubcription.eventEmitter.setMaxListeners(100);

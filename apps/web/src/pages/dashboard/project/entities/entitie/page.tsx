@@ -51,6 +51,14 @@ interface AttributeTemporalSeries {
   points: TemporalDataPoint[];
 }
 
+const INTERNAL_API_URL = (
+  import.meta.env.VITE_INTERNAL_API_URL || "http://workspace:3000"
+).replace(/\/$/, "");
+
+const FIWARE_CONTEXT_URL =
+  import.meta.env.VITE_FIWARE_CONTEXT_URL ||
+  `${INTERNAL_API_URL}/api/fiware/context-file/context.jsonld`;
+
 const PRESET_RANGES: Array<{
   id: TimeSlicePreset;
   label: string;
@@ -274,8 +282,7 @@ async function fetchTemporalEntity(params: {
     searchParams.set("lastN", String(params.lastN));
   }
 
-  const contextUrl =
-    "http://workspace:3000/api/fiware/context-file/context.jsonld";
+  const contextUrl = FIWARE_CONTEXT_URL;
   const url = `/ngsi-ld/v1/temporal/entities/${encodeURIComponent(params.entityId)}?${searchParams.toString()}`;
 
   const response = await fetch(url, {
@@ -726,7 +733,7 @@ export default function ProjectEntityTelemetryPage() {
 
   const contextLinkHeader = useMemo(
     () =>
-      `<http://workspace:3000/api/fiware/context-file/context.jsonld>; rel="http://www.w3.org/ns/json-ld#context"; type="application/ld+json"`,
+      `<${FIWARE_CONTEXT_URL}>; rel="http://www.w3.org/ns/json-ld#context"; type="application/ld+json"`,
     [],
   );
 
