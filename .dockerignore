@@ -3,3 +3,5 @@
 .git
 .env
 volumes/*_data
+
+**/generated
