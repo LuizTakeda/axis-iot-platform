@@ -10,7 +10,7 @@ import { cn, formatProjectString } from "@/lib/utils";
 import {
   parseEntityAttributes,
   type ParsedAttribute,
-} from "@/pages/dashboard/project/entities/components/entity-card";
+} from "@/pages/dashboard/project/entities/components/entity-utils";
 import {
   Activity,
   ArrowLeft,
@@ -50,6 +50,14 @@ interface AttributeTemporalSeries {
   unit?: string;
   points: TemporalDataPoint[];
 }
+
+const INTERNAL_API_URL = (
+  import.meta.env.VITE_INTERNAL_API_URL || "http://workspace:3000"
+).replace(/\/$/, "");
+
+const FIWARE_CONTEXT_URL =
+  import.meta.env.VITE_FIWARE_CONTEXT_URL ||
+  `${INTERNAL_API_URL}/api/fiware/context-file/context.jsonld`;
 
 const PRESET_RANGES: Array<{
   id: TimeSlicePreset;
@@ -274,8 +282,7 @@ async function fetchTemporalEntity(params: {
     searchParams.set("lastN", String(params.lastN));
   }
 
-  const contextUrl =
-    "http://workspace:3000/api/fiware/context-file/context.jsonld";
+  const contextUrl = FIWARE_CONTEXT_URL;
   const url = `/ngsi-ld/v1/temporal/entities/${encodeURIComponent(params.entityId)}?${searchParams.toString()}`;
 
   const response = await fetch(url, {
@@ -726,7 +733,7 @@ export default function ProjectEntityTelemetryPage() {
 
   const contextLinkHeader = useMemo(
     () =>
-      `<http://workspace:3000/api/fiware/context-file/context.jsonld>; rel="http://www.w3.org/ns/json-ld#context"; type="application/ld+json"`,
+      `<${FIWARE_CONTEXT_URL}>; rel="http://www.w3.org/ns/json-ld#context"; type="application/ld+json"`,
     [],
   );
 
@@ -850,32 +857,6 @@ export default function ProjectEntityTelemetryPage() {
     });
   }, [currentAttributes, temporalEntity]);
 
-  const handleSelectPreset = (newPreset: TimeSlicePreset) => {
-    setPreset(newPreset);
-    setReferenceNow(Date.now());
-  };
-
-  const handleRefreshAll = async () => {
-    setReferenceNow(Date.now());
-    await Promise.all([mutateEntity(), mutateTemporal()]);
-  };
-
-  const handleCopyEntityId = async () => {
-    if (!entityId) return;
-    await navigator.clipboard.writeText(entityId);
-    setCopiedId(true);
-    setTimeout(() => setCopiedId(false), 2000);
-  };
-
-  if (!project) return null;
-
-  const projectTitle = formatProjectString(project);
-
-  // Friendly short name & type extraction
-  const shortId = entityId.includes(":")
-    ? entityId.split(":").slice(-2).join(":")
-    : entityId;
-
   const entityTypeDisplay = useMemo(() => {
     if (currentEntity?.type) {
       return Array.isArray(currentEntity.type)
@@ -894,6 +875,32 @@ export default function ProjectEntityTelemetryPage() {
     }
     return "Entity";
   }, [currentEntity, temporalEntity, entityId]);
+
+  const handleSelectPreset = (newPreset: TimeSlicePreset) => {
+    setPreset(newPreset);
+    setReferenceNow(() => Date.now());
+  };
+
+  const handleRefreshAll = async () => {
+    setReferenceNow(() => Date.now());
+    await Promise.all([mutateEntity(), mutateTemporal()]);
+  };
+
+  const handleCopyEntityId = async () => {
+    if (!entityId) return;
+    await navigator.clipboard.writeText(entityId);
+    setCopiedId(true);
+    setTimeout(() => setCopiedId(false), 2000);
+  };
+
+  if (!project) return null;
+
+  const projectTitle = formatProjectString(project);
+
+  // Friendly short name & type extraction
+  const shortId = entityId.includes(":")
+    ? entityId.split(":").slice(-2).join(":")
+    : entityId;
 
   return (
     <div>

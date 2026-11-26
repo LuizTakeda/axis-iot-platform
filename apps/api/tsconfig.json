@@ -8,7 +8,7 @@
     // See also https://aka.ms/tsconfig/module
     "module": "nodenext",
     "target": "esnext",
-    "types": [],
+    "types": ["node"],
     // For nodejs:
     // "lib": ["esnext"],
     // "types": ["node"],
@@ -36,22 +36,11 @@
     "moduleDetection": "force",
     "skipLibCheck": true,
     "paths": {
-      "@/*": [
-        "./src/*"
-      ],
-      "@plugins/*": [
-        "./src/plugins/*"
-      ],
-      "@routes/*": [
-        "./src/routes/*"
-      ],
-      "@generated/*":[
-        "./generated/*"
-      ]
+      "@/*": ["./src/*"],
+      "@plugins/*": ["./src/plugins/*"],
+      "@routes/*": ["./src/routes/*"],
+      "@generated/*": ["./generated/*"]
     }
   },
-  "include": [
-    "src",
-    "prisma.config.ts"
-  ]
+  "include": ["src", "prisma.config.ts", "eslint.config.ts", "vitest.config.ts"]
 }

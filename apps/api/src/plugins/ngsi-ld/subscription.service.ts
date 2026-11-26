@@ -14,9 +14,12 @@ const httpErrors = sensible.httpErrors;
 export const DEFAULT_ORION_BASE_URL =
   process.env.ORION_LD_URL || "http://orion-ld:1026";
 
+export const DEFAULT_INTERNAL_API_URL =
+  process.env.INTERNAL_API_URL || "http://workspace:3000";
+
 export const DEFAULT_WEBHOOK_URL =
   process.env.NGSI_LD_WEBHOOK_URL ||
-  "http://workspace:3000/api/ngsi-ld/subscription";
+  `${DEFAULT_INTERNAL_API_URL.replace(/\/$/, "")}/api/ngsi-ld/subscription`;
 
 export const SUBSCRIPTIONS_BASE_PATH = "/ngsi-ld/v1/subscriptions";
 
@@ -150,15 +153,17 @@ export async function getTenantTypes(
 
 /**
  * Creates a subscription for all entities of a specific tenant.
- * Configured so Orion-LD posts notifications to http://workspace:3000/api/ngsi-ld/subscription.
+ * Configured so Orion-LD posts notifications to the internal API webhook URL.
  *
  * @param tenant - The target tenant identifier
  * @param baseUrl - Optional custom base URL for the Orion-LD Context Broker
+ * @param webhookUrl - Optional custom webhook URL for subscription notifications
  * @returns The created subscription ID and Location header
  */
 export async function createTenantSubscription(
   tenant: string,
   baseUrl: string = DEFAULT_ORION_BASE_URL,
+  webhookUrl: string = DEFAULT_WEBHOOK_URL,
 ): Promise<CreateTenantSubscriptionResult> {
   const subscriptionId = getTenantSubscriptionId(tenant);
   const url = new URL(SUBSCRIPTIONS_BASE_PATH, baseUrl);
@@ -175,7 +180,7 @@ export async function createTenantSubscription(
     entities,
     notification: {
       endpoint: {
-        uri: DEFAULT_WEBHOOK_URL,
+        uri: webhookUrl,
         accept: "application/json",
       },
       format: "keyValues",

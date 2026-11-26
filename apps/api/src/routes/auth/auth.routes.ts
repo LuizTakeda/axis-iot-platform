@@ -144,7 +144,7 @@ const authRoutes: FastifyPluginAsyncZod = async (fastify) => {
         }
 
         return reply.redirect(redirectTo);
-      } catch (err: any) {
+      } catch (err) {
         request.log.error(err);
         return reply.unauthorized();
       }
@@ -191,6 +191,7 @@ const authRoutes: FastifyPluginAsyncZod = async (fastify) => {
             {
               ...cookieOptions,
               maxAge:
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 (tokenObj.token as any).refresh_expires_in || 1 * 24 * 60 * 60,
             },
           );
@@ -219,7 +220,7 @@ const authRoutes: FastifyPluginAsyncZod = async (fastify) => {
         },
       },
     },
-    async (request, _) => {
+    async (request) => {
       const user = request.user!;
 
       const response = {

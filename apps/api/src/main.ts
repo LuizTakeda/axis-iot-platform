@@ -1,11 +1,8 @@
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
 import fastify, {
   type FastifyError,
   type FastifyReply,
   type FastifyRequest,
 } from "fastify";
-import autoload from "@fastify/autoload";
 import swaggerPlugin from "./plugins/swagger.js";
 import cors from "./plugins/cors.js";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
@@ -21,9 +18,7 @@ import oauth2Plugin from "@plugins/oauth2.js";
 import authPlugin from "@/plugins/auth/auth.js";
 import mqttPlugin from "@/plugins/mqtt/index.js";
 import ngsiLdPlugin from "@/plugins/ngsi-ld/index.js";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+import apiRoutes from "@/routes/index.js";
 
 const isDevelopment = process.env.NODE_ENV !== "production";
 
@@ -84,11 +79,7 @@ app.setErrorHandler(
   },
 );
 
-await app.register(autoload, {
-  dir: join(__dirname, "routes"),
-  options: { prefix: "/api" },
-  matchFilter: /.*\.routes\.(ts|js)$/,
-});
+await app.register(apiRoutes, { prefix: "/api" });
 
 //**************************************************
 // Start

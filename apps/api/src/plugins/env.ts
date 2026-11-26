@@ -15,6 +15,9 @@ const envSchema = z.object({
   MQTT_BROKER_URL: z.string(),
   MQTT_BROKER_USERNAME: z.string(),
   MQTT_BROKER_PASSWORD: z.string(),
+  INTERNAL_API_URL: z.url().default("http://workspace:3000"),
+  ORION_LD_URL: z.url().default("http://orion-ld:1026"),
+  NGSI_LD_WEBHOOK_URL: z.url().optional(),
 });
 
 type Env = z.infer<typeof envSchema>;

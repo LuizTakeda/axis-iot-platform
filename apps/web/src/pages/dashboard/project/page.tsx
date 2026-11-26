@@ -1,6 +1,6 @@
 import { Link, useParams } from "react-router";
 import PageHeader from "../components/page-header";
-import { ArrowRight, Cpu, Database, FileCode2, FolderGit2 } from "lucide-react";
+import { ArrowRight, Cpu, Database, FolderGit2 } from "lucide-react";
 import { buttonVariants } from "@/components/ui/button";
 import { cn, formatProjectString } from "@/lib/utils";
 
