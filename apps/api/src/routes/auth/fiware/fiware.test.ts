@@ -1,28 +1,21 @@
-import fastifySensible, { httpErrors } from "@fastify/sensible";
-import { fastify, type FastifyInstance } from "fastify";
-import {
-  serializerCompiler,
-  validatorCompiler,
-  type ZodTypeProvider,
-} from "fastify-type-provider-zod";
+import { httpErrors } from "@fastify/sensible";
+import { type FastifyInstance } from "fastify";
 import { describe, expect, it, vi, afterEach, beforeEach } from "vitest";
-import type {} from "@plugins/auth/auth.js";
 import fiwareRoutes from "./fiware.routes.js";
+import {
+  buildAuthenticateFiwareTenantAccessMock,
+  buildTestApp,
+} from "@/test/build-test-app.js";
 
 describe("GET /api/auth/fiware/tenant-access", () => {
   let app: FastifyInstance;
 
-  const mockAuthFiware =
-    vi.fn<FastifyInstance["authenticateFiwareTenantAccess"]>();
+  const mockAuthFiware = buildAuthenticateFiwareTenantAccessMock();
 
   beforeEach(async () => {
     vi.clearAllMocks();
 
-    app = fastify().withTypeProvider<ZodTypeProvider>();
-    app.setValidatorCompiler(validatorCompiler);
-    app.setSerializerCompiler(serializerCompiler);
-
-    await app.register(fastifySensible);
+    app = await buildTestApp();
 
     app.decorate("authenticateFiwareTenantAccess", mockAuthFiware);
 
@@ -36,8 +29,6 @@ describe("GET /api/auth/fiware/tenant-access", () => {
   });
 
   it("calls authenticateFiwareTenantAccess and returns 200 ok when allowed", async () => {
-    mockAuthFiware.mockImplementationOnce(async () => {});
-
     const res = await app.inject({
       method: "GET",
       url: "/api/auth/fiware/tenant-access",
